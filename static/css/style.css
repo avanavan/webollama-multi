@@ -496,6 +496,27 @@ p.text-muted {
   font-size: 0.875rem;
 }
 
+/* The global .form-select padding override above removes the room Bootstrap
+   reserves for the dropdown chevron; restore it so the chevron never paints
+   over the option text (most visible in the navbar active-server select). */
+.form-select {
+  padding-right: 2.25rem;
+  background-position: right 0.75rem center;
+}
+.form-select-sm {
+  padding-right: 1.75rem;
+}
+.navbar .form-select-sm {
+  min-width: 9rem;
+  max-width: 16rem;
+}
+
+/* Pull-queue progress bars need their state colors back (the global
+   .progress-bar override forces black with !important). */
+#queue-area .progress-bar.bg-danger { background-color: var(--danger-color) !important; }
+#queue-area .progress-bar.bg-success { background-color: var(--success-color) !important; }
+#queue-area .progress-bar.bg-secondary { background-color: var(--secondary-color) !important; }
+
 /* Copy to clipboard button */
 .copy-button {
   padding: 0.25rem 0.5rem;
