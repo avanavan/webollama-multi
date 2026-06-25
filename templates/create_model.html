@@ -118,6 +118,12 @@ document.getElementById('create-model-form').addEventListener('submit', function
             } catch (e) {}
           });
           read();
+        }).catch(function () {
+          if (!bar.classList.contains('bg-danger')) {
+            status.textContent = 'connection lost';
+            bar.classList.add('bg-danger');
+          }
+          finish();
         });
       }
       read();

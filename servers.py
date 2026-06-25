@@ -3,7 +3,7 @@ import os
 import threading
 import uuid
 
-_LOCK = threading.Lock()
+_LOCK = threading.RLock()
 
 
 def _servers_file():
@@ -37,9 +37,9 @@ def _seed():
 def _read():
     path = _servers_file()
     if not os.path.exists(path):
-        data = _seed()
-        _write(data)
-        return data
+        with _LOCK:
+            if not os.path.exists(path):
+                _write(_seed())
     with open(path, "r") as f:
         return json.load(f)
 

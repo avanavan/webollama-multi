@@ -251,7 +251,10 @@ def create_model_stream():
     server = servers.get_server(data.get('server_id'))
     if not server or not data.get('model_name'):
         return jsonify({"error": "server_id and model_name are required"}), 400
-    payload = build_create_payload(data, stream=True)
+    try:
+        payload = build_create_payload(data, stream=True)
+    except (ValueError, TypeError) as e:
+        return jsonify({"error": "Invalid parameter: " + str(e)}), 400
 
     def generate():
         try:

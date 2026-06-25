@@ -173,6 +173,16 @@ def test_broadcast_delete_collects_per_server_results(client, monkeypatch):
     assert ok["Remote"] is False
 
 
+def test_create_stream_rejects_bad_num_ctx(client):
+    app_module, test_client = client
+    import servers
+    s = servers.list_servers()[0]
+    resp = test_client.post("/create-model/stream", json={
+        "server_id": s["id"], "model_name": "m", "from_model": "base", "num_ctx": "not-a-number"
+    })
+    assert resp.status_code == 400
+
+
 def test_merged_models_marks_drift_and_survives_offline(client, monkeypatch):
     app_module, _ = client
     import servers
