@@ -51,8 +51,6 @@ def test_set_active_server(client):
     app_module, test_client = client
     import servers
     s = servers.add_server("Remote", "http://10.0.0.6:11434")
-    with test_client.session_transaction() as sess:
-        pass
     resp = test_client.post("/servers/active", data={"server_id": s["id"]},
                             follow_redirects=True)
     assert resp.status_code == 200
@@ -67,3 +65,17 @@ def test_delete_last_server_flashes_error(client):
     resp = test_client.post(f"/servers/{only['id']}/delete", follow_redirects=True)
     assert resp.status_code == 200
     assert len(servers.list_servers()) == 1
+    assert b"cannot delete the last server" in resp.data
+
+
+def test_add_duplicate_server_flashes_error(client):
+    app_module, test_client = client
+    import servers
+    servers.add_server("Remote", "http://10.0.0.7:11434")
+    resp = test_client.post("/servers/add", data={
+        "name": "Dup", "base_url": "http://10.0.0.7:11434"
+    }, follow_redirects=True)
+    assert resp.status_code == 200
+    assert b"already exists" in resp.data
+    # still only the seeded server + the one Remote we added
+    assert len([s for s in servers.list_servers() if s["base_url"] == "http://10.0.0.7:11434"]) == 1

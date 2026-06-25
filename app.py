@@ -554,7 +554,10 @@ def servers_delete(server_id):
 
 @app.route('/servers/active', methods=['POST'])
 def servers_set_active():
-    servers.set_active(session, request.form.get('server_id'))
+    try:
+        servers.set_active(session, request.form.get('server_id'))
+    except ValueError as e:
+        flash(str(e), "danger")
     return redirect(request.referrer or url_for('models'))
 
 

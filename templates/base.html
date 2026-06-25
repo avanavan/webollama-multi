@@ -34,6 +34,7 @@
                         </a>
                     </li>
                 </ul>
+                {% if nav_servers %}
                 <form method="POST" action="{{ url_for('servers_set_active') }}" class="d-flex align-items-center ms-auto">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <label class="text-nowrap me-2 small text-muted">Active server</label>
@@ -43,6 +44,7 @@
                     {% endfor %}
                   </select>
                 </form>
+                {% endif %}
             </div>
         </div>
     </nav>
