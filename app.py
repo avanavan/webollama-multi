@@ -275,7 +275,15 @@ def create_model_stream():
         try:
             resp = OllamaClient(server["base_url"]).create(payload, stream=True)
             if resp.status_code != 200:
-                yield f"data: {json.dumps({'error': f'HTTP {resp.status_code}'})}\n\n"
+                detail = (resp.text or "").strip()
+                try:
+                    detail = json.loads(detail).get("error", detail)
+                except (ValueError, AttributeError):
+                    pass
+                msg = f"HTTP {resp.status_code}"
+                if detail:
+                    msg += f": {detail}"
+                yield f"data: {json.dumps({'error': msg})}\n\n"
                 return
             for line in resp.iter_lines():
                 if line:

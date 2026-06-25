@@ -179,6 +179,31 @@ def test_create_stream_forwards(client, monkeypatch):
     assert '"done": true' in body
 
 
+def test_create_stream_surfaces_ollama_error_body(client, monkeypatch):
+    """When Ollama rejects the create (e.g. HTTP 400 'malformed ...'), the route
+    must forward Ollama's actual error message, not just the bare status code."""
+    app_module, test_client = client
+    import servers
+    s = servers.list_servers()[0]
+
+    class FakeResp:
+        status_code = 400
+        text = '{"error":"invalid model name: \\"My Model\\" is malformed"}'
+
+    class FakeClient:
+        def __init__(self, *a, **k): pass
+        def create(self, payload, stream=False): return FakeResp()
+
+    monkeypatch.setattr(app_module, "OllamaClient", FakeClient)
+    resp = test_client.post("/create-model/stream", json={
+        "server_id": s["id"], "model_name": "My Model", "from_model": "base",
+    })
+    assert resp.status_code == 200  # the SSE channel itself opens fine
+    body = resp.get_data(as_text=True)
+    assert "malformed" in body  # Ollama's real reason reaches the browser
+    assert "400" in body
+
+
 def test_create_stream_requires_server_and_model(client):
     app_module, test_client = client
     # missing model_name
