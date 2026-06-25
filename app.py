@@ -203,14 +203,39 @@ def pull_stream():
 
     return Response(generate(), mimetype='text/event-stream')
 
+@app.route('/create-model/stream', methods=['POST'])
+def create_model_stream():
+    data = request.get_json(silent=True) or {}
+    server = servers.get_server(data.get('server_id'))
+    if not server or not data.get('model_name'):
+        return jsonify({"error": "server_id and model_name are required"}), 400
+    payload = build_create_payload(data, stream=True)
+
+    def generate():
+        try:
+            resp = OllamaClient(server["base_url"]).create(payload, stream=True)
+            if resp.status_code != 200:
+                yield f"data: {json.dumps({'error': f'HTTP {resp.status_code}'})}\n\n"
+                return
+            for line in resp.iter_lines():
+                if line:
+                    yield f"data: {line.decode('utf-8')}\n\n"
+            yield f"data: {json.dumps({'done': True})}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return Response(generate(), mimetype='text/event-stream')
+
+
 @app.route('/create', methods=['GET'])
 def create_model_page():
     try:
         models_data = active_client().tags()
-        return render_template('create_model.html', models=models_data.get('models', []))
+        return render_template('create_model.html', models=models_data.get('models', []),
+                               servers=servers.get_enabled())
     except Exception as e:
         flash(f"Error connecting to Ollama API: {str(e)}", "danger")
-        return render_template('create_model.html', models=[])
+        return render_template('create_model.html', models=[], servers=servers.get_enabled())
 
 @app.route('/create-model', methods=['GET', 'POST'])
 def create_model():

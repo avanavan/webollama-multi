@@ -102,3 +102,40 @@ def test_pull_stream_forwards_and_terminates(client, monkeypatch):
     body = resp.get_data(as_text=True)
     assert '"completed":50' in body
     assert '"done": true' in body
+
+
+def test_build_create_payload_includes_num_ctx_and_params(client):
+    app_module, _ = client
+    payload = app_module.build_create_payload({
+        "model_name": "m", "from_model": "base", "num_ctx": "8192",
+        "parameters": [{"key": "temperature", "value": "0.5"},
+                       {"key": "stop", "value": "END"}],
+    }, stream=True)
+    assert payload["from"] == "base"
+    assert payload["parameters"]["num_ctx"] == 8192
+    assert payload["parameters"]["temperature"] == 0.5
+    assert payload["parameters"]["stop"] == "END"
+    assert payload["stream"] is True
+
+
+def test_create_stream_forwards(client, monkeypatch):
+    app_module, test_client = client
+    import servers
+    s = servers.list_servers()[0]
+
+    class FakeResp:
+        status_code = 200
+        def iter_lines(self):
+            yield b'{"status":"creating"}'
+
+    class FakeClient:
+        def __init__(self, *a, **k): pass
+        def create(self, payload, stream=False): return FakeResp()
+
+    monkeypatch.setattr(app_module, "OllamaClient", FakeClient)
+    resp = test_client.post("/create-model/stream", json={
+        "server_id": s["id"], "model_name": "m", "from_model": "base", "num_ctx": "4096"
+    })
+    body = resp.get_data(as_text=True)
+    assert '"creating"' in body
+    assert '"done": true' in body
