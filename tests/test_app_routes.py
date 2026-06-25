@@ -12,6 +12,17 @@ def client(servers_file, monkeypatch):
     return app_module, app_module.app.test_client()
 
 
+def test_no_active_server_shows_clear_message(client):
+    app_module, test_client = client
+    import servers
+    importlib.reload(servers)
+    only = servers.list_servers()[0]
+    servers.update_server(only["id"], enabled=False)
+    resp = test_client.get("/models")
+    assert resp.status_code == 200
+    assert b"No active server configured" in resp.data
+
+
 def test_models_page_renders_with_mocked_tags(client, monkeypatch):
     app_module, test_client = client
 

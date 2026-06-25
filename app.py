@@ -24,7 +24,10 @@ def client_for(server_id):
 
 
 def active_client():
-    return client_for(servers.get_active_id(session))
+    c = client_for(servers.get_active_id(session))
+    if c is None:
+        raise RuntimeError("No active server configured. Add or enable a server on the Servers page.")
+    return c
 
 
 def coerce_param(value):
