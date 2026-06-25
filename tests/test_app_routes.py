@@ -98,6 +98,7 @@ def test_pull_stream_forwards_and_terminates(client, monkeypatch):
 
     monkeypatch.setattr(app_module, "OllamaClient", FakeClient)
     resp = test_client.post("/pull/stream", json={"server_id": s["id"], "model": "llama3.2"})
+    assert resp.status_code == 200
     body = resp.get_data(as_text=True)
     assert '"completed":50' in body
     assert '"done": true' in body

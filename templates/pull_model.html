@@ -61,6 +61,17 @@ document.getElementById('pull-btn').addEventListener('click', function () {
       headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
       body: JSON.stringify({ server_id: sid, model: model })
     }).then(function (resp) {
+      if (!resp.ok) {
+        return resp.json().then(function (j) {
+          status.textContent = 'error: ' + (j.error || resp.status);
+          bar.classList.add('bg-danger');
+          finish();
+        }).catch(function () {
+          status.textContent = 'error: ' + resp.status;
+          bar.classList.add('bg-danger');
+          finish();
+        });
+      }
       const reader = resp.body.getReader();
       const decoder = new TextDecoder();
       function read() {
@@ -72,7 +83,7 @@ document.getElementById('pull-btn').addEventListener('click', function () {
               const d = JSON.parse(line.slice(6));
               if (d.error) { status.textContent = 'error: ' + d.error; bar.classList.add('bg-danger'); return; }
               if (d.done) { return; }
-              if (d.total && d.completed != null) {
+              if (d.total && d.completed !== null && d.completed !== undefined) {
                 const pct = Math.floor(d.completed / d.total * 100);
                 bar.style.width = pct + '%'; bar.textContent = pct + '%';
               }
