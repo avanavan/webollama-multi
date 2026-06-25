@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, Response
+from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, Response, session
 import requests
 import json
 import os
@@ -6,6 +6,8 @@ from dotenv import load_dotenv
 import base64
 from flask_wtf.csrf import CSRFProtect
 import markdown
+import servers
+from ollama_client import OllamaClient
 
 load_dotenv()
 
@@ -13,9 +15,58 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-key-change-in-production')
 csrf = CSRFProtect(app)
 
-# Ollama API base URL
-OLLAMA_API_BASE = os.getenv('OLLAMA_API_BASE', 'http://127.0.0.1:11434')
-OLLAMA_API_URL = f"{OLLAMA_API_BASE}/api"
+# OLLAMA_API_BASE is now only the seed for the first server (see servers.py).
+
+
+def client_for(server_id):
+    rec = servers.get_server(server_id)
+    return OllamaClient(rec["base_url"]) if rec else None
+
+
+def active_client():
+    return client_for(servers.get_active_id(session))
+
+
+def coerce_param(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value
+    s = str(value).strip()
+    low = s.lower()
+    if low in ("true", "false"):
+        return low == "true"
+    try:
+        return int(s)
+    except ValueError:
+        pass
+    try:
+        return float(s)
+    except ValueError:
+        pass
+    return s
+
+
+def build_create_payload(data, stream):
+    payload = {"model": data.get("model_name"), "stream": stream}
+    if data.get("system_prompt"):
+        payload["system"] = data["system_prompt"]
+    if data.get("template"):
+        payload["template"] = data["template"]
+    if data.get("from_model"):
+        payload["from"] = data["from_model"]
+    if data.get("quantize"):
+        payload["quantize"] = data["quantize"]
+    params = {}
+    if data.get("num_ctx"):
+        params["num_ctx"] = int(data["num_ctx"])
+    for row in data.get("parameters", []):
+        key = (row.get("key") or "").strip()
+        if key:
+            params[key] = coerce_param(row.get("value"))
+    if params:
+        payload["parameters"] = params
+    return payload
 
 # App configuration
 PORT = int(os.getenv('PORT', 5000))
@@ -26,10 +77,9 @@ def index():
     current_version = "Unknown"
     # Get current version from Ollama API
     try:
-        response = requests.get(f"{OLLAMA_API_URL}/version")
-        if response.status_code == 200:
-            version_data = response.json()
-            current_version = version_data.get('version', 'Unknown')
+        client = active_client()
+        version_data = client.version()
+        current_version = version_data.get('version', 'Unknown')
     except Exception:
         pass
     return render_template('index.html', version=current_version)
@@ -38,56 +88,51 @@ def index():
 def models():
     try:
         from datetime import datetime
-        
-        response = requests.get(f"{OLLAMA_API_URL}/tags")
-        if response.status_code == 200:
-            models_data = response.json()
-            models_list = models_data.get('models', [])
-            
-            # Calculate how long ago each model was modified
-            for model in models_list:
-                if model.get('modified_at'):
-                    try:
-                        # Parse ISO 8601 format
-                        modified_time = datetime.fromisoformat(model['modified_at'].replace('Z', '+00:00'))
-                        now = datetime.now().astimezone()
-                        
-                        # Calculate time difference in seconds
-                        time_diff = (now - modified_time).total_seconds()
-                        
-                        if time_diff < 60:
-                            model['modified_ago'] = f"{int(time_diff)} seconds ago"
-                        elif time_diff < 3600:
-                            model['modified_ago'] = f"{int(time_diff // 60)} minutes ago"
-                        elif time_diff < 86400:
-                            model['modified_ago'] = f"{int(time_diff // 3600)} hours ago"
-                        elif time_diff < 604800: # 7 days
-                            model['modified_ago'] = f"{int(time_diff // 86400)} days ago"
-                        elif time_diff < 2592000: # 30 days
-                            model['modified_ago'] = f"{int(time_diff // 604800)} weeks ago"
-                        else:
-                            model['modified_ago'] = f"{int(time_diff // 2592000)} months ago"
-                    except Exception:
-                        model['modified_ago'] = 'Unknown'
-                else:
+
+        models_data = active_client().tags()
+        models_list = models_data.get('models', [])
+
+        # Calculate how long ago each model was modified
+        for model in models_list:
+            if model.get('modified_at'):
+                try:
+                    # Parse ISO 8601 format
+                    modified_time = datetime.fromisoformat(model['modified_at'].replace('Z', '+00:00'))
+                    now = datetime.now().astimezone()
+
+                    # Calculate time difference in seconds
+                    time_diff = (now - modified_time).total_seconds()
+
+                    if time_diff < 60:
+                        model['modified_ago'] = f"{int(time_diff)} seconds ago"
+                    elif time_diff < 3600:
+                        model['modified_ago'] = f"{int(time_diff // 60)} minutes ago"
+                    elif time_diff < 86400:
+                        model['modified_ago'] = f"{int(time_diff // 3600)} hours ago"
+                    elif time_diff < 604800:  # 7 days
+                        model['modified_ago'] = f"{int(time_diff // 86400)} days ago"
+                    elif time_diff < 2592000:  # 30 days
+                        model['modified_ago'] = f"{int(time_diff // 604800)} weeks ago"
+                    else:
+                        model['modified_ago'] = f"{int(time_diff // 2592000)} months ago"
+                except Exception:
                     model['modified_ago'] = 'Unknown'
-            
-            # Get sort params from request
-            sort_by = request.args.get('sort', 'name')
-            sort_order = request.args.get('order', 'asc')
-            
-            # Handle sorting
-            if sort_by == 'name':
-                models_list.sort(key=lambda x: x.get('name', '').lower(), reverse=(sort_order == 'desc'))
-            elif sort_by == 'size':
-                models_list.sort(key=lambda x: x.get('size', 0), reverse=(sort_order == 'desc'))
-            elif sort_by == 'modified':
-                models_list.sort(key=lambda x: x.get('modified_at', ''), reverse=(sort_order == 'desc'))
-            
-            return render_template('models.html', models=models_list, sort_by=sort_by, sort_order=sort_order)
-        else:
-            flash(f"Error fetching models: {response.status_code}", "danger")
-            return render_template('models.html', models=[], sort_by='name', sort_order='asc')
+            else:
+                model['modified_ago'] = 'Unknown'
+
+        # Get sort params from request
+        sort_by = request.args.get('sort', 'name')
+        sort_order = request.args.get('order', 'asc')
+
+        # Handle sorting
+        if sort_by == 'name':
+            models_list.sort(key=lambda x: x.get('name', '').lower(), reverse=(sort_order == 'desc'))
+        elif sort_by == 'size':
+            models_list.sort(key=lambda x: x.get('size', 0), reverse=(sort_order == 'desc'))
+        elif sort_by == 'modified':
+            models_list.sort(key=lambda x: x.get('modified_at', ''), reverse=(sort_order == 'desc'))
+
+        return render_template('models.html', models=models_list, sort_by=sort_by, sort_order=sort_order)
     except Exception as e:
         flash(f"Error connecting to Ollama API: {str(e)}", "danger")
         return render_template('models.html', models=[], sort_by='name', sort_order='asc')
@@ -95,13 +140,8 @@ def models():
 @app.route('/models/<path:model_name>')
 def model_detail(model_name):
     try:
-        response = requests.post(f"{OLLAMA_API_URL}/show", json={"model": model_name})
-        if response.status_code == 200:
-            model_info = response.json()
-            return render_template('model_detail.html', model=model_info, model_name=model_name)
-        else:
-            flash(f"Error fetching model details: {response.status_code}", "danger")
-            return redirect(url_for('models'))
+        model_info = active_client().show(model_name)
+        return render_template('model_detail.html', model=model_info, model_name=model_name)
     except Exception as e:
         flash(f"Error connecting to Ollama API: {str(e)}", "danger")
         return redirect(url_for('models'))
@@ -109,7 +149,7 @@ def model_detail(model_name):
 @app.route('/models/delete/<path:model_name>', methods=['POST'])
 def delete_model(model_name):
     try:
-        response = requests.delete(f"{OLLAMA_API_URL}/delete", json={"model": model_name})
+        response = active_client().delete(model_name)
         if response.status_code == 200:
             flash(f"Model {model_name} deleted successfully", "success")
         else:
@@ -122,7 +162,7 @@ def delete_model(model_name):
 def update_model(model_name):
     try:
         # Re-pull the model to get the latest version
-        response = requests.post(f"{OLLAMA_API_URL}/pull", json={"model": model_name, "stream": False})
+        response = active_client().pull(model_name, stream=False)
         if response.status_code == 200:
             flash(f"Model {model_name} updated successfully", "success")
         else:
@@ -136,7 +176,7 @@ def pull_model():
     if request.method == 'POST':
         model_name = request.form.get('model_name')
         try:
-            response = requests.post(f"{OLLAMA_API_URL}/pull", json={"model": model_name, "stream": False})
+            response = active_client().pull(model_name, stream=False)
             if response.status_code == 200:
                 flash(f"Model {model_name} pulled successfully", "success")
             else:
@@ -150,13 +190,8 @@ def pull_model():
 @app.route('/create', methods=['GET'])
 def create_model_page():
     try:
-        response = requests.get(f"{OLLAMA_API_URL}/tags")
-        if response.status_code == 200:
-            models_data = response.json()
-            return render_template('create_model.html', models=models_data.get('models', []))
-        else:
-            flash(f"Error fetching models: {response.status_code}", "danger")
-            return render_template('create_model.html', models=[])
+        models_data = active_client().tags()
+        return render_template('create_model.html', models=models_data.get('models', []))
     except Exception as e:
         flash(f"Error connecting to Ollama API: {str(e)}", "danger")
         return render_template('create_model.html', models=[])
@@ -192,53 +227,45 @@ def create_model():
     if not model_name:
         flash("Model name is required", "danger")
         return redirect(url_for('create_model_page'))
-    
+
     if not creation_method:
         flash("Creation method is required", "danger")
         return redirect(url_for('create_model_page'))
-    
-    # Prepare the payload
-    payload = {
-        "model": model_name,
-        "stream": stream
+
+    # Build data dict for build_create_payload
+    data = {
+        "model_name": model_name,
+        "system_prompt": system_prompt,
+        "template": template,
+        "from_model": from_model,
+        "quantize": quantize,
     }
-    
-    # Add optional parameters if provided
-    if system_prompt:
-        payload["system"] = system_prompt
-    
-    if template:
-        payload["template"] = template
-    
+
     # Handle creation method
     if creation_method == 'from_model':
         if not from_model:
             flash("Base model is required when creating from an existing model", "danger")
             return redirect(url_for('create_model_page'))
-        
-        payload["from"] = from_model
-        
-        # Add quantize if specified
-        if quantize:
-            payload["quantize"] = quantize
-    
+
     # Handle file-based creation (placeholder for future implementation)
     elif creation_method == 'from_files':
         flash("Creating models from files is not yet implemented in the web interface", "warning")
         return redirect(url_for('create_model_page'))
-    
+
+    payload = build_create_payload(data, stream)
+
     try:
         if stream:
             return Response(stream_create_model(payload), mimetype='text/event-stream')
         else:
             # Call Ollama API to create the model (non-streaming)
-            response = requests.post(f"{OLLAMA_API_URL}/create", json=payload)
-            
+            response = active_client().create(payload, stream=False)
+
             if response.status_code == 200:
                 flash(f"Model {model_name} created successfully", "success")
             else:
                 flash(f"Error creating model: {response.status_code} - {response.text}", "danger")
-            
+
             return redirect(url_for('models'))
     except Exception as e:
         flash(f"Error connecting to Ollama API: {str(e)}", "danger")
@@ -248,19 +275,15 @@ def stream_create_model(payload):
     """Stream the model creation process from Ollama API."""
     try:
         # Make streaming request to Ollama API
-        response = requests.post(
-            f"{OLLAMA_API_URL}/create",
-            json=payload,
-            stream=True
-        )
-        
+        response = active_client().create(payload, stream=True)
+
         if response.status_code != 200:
             error_msg = f"Error from Ollama API: {response.status_code}"
             if hasattr(response, 'text'):
                 error_msg += f" - {response.text}"
             yield f"data: {json.dumps({'error': error_msg})}\n\n"
             return
-        
+
         for line in response.iter_lines():
             if line:
                 try:
@@ -268,10 +291,10 @@ def stream_create_model(payload):
                     yield f"data: {line.decode('utf-8')}\n\n"
                 except Exception:
                     continue
-        
+
         # Send a final success message
         yield f"data: {json.dumps({'done': True, 'message': 'Model created successfully'})}\n\n"
-        
+
     except Exception as e:
         yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
@@ -279,47 +302,42 @@ def stream_create_model(payload):
 def running_models():
     try:
         from datetime import datetime
-        
-        response = requests.get(f"{OLLAMA_API_URL}/ps")
-        if response.status_code == 200:
-            models_data = response.json()
-            models = models_data.get('models', [])
-            
-            # Add expires_in calculation
-            for model in models:
-                if model.get('expires_at'):
-                    # Check if it's the "never expires" sentinel value
-                    if model['expires_at'].startswith('0001-01-01'):
-                        model['expires_in'] = 'Never'
-                    else:
-                        # Parse the expiration time
-                        try:
-                            # Parse ISO 8601 format
-                            expiry_time = datetime.fromisoformat(model['expires_at'].replace('Z', '+00:00'))
-                            now = datetime.now().astimezone()
-                            
-                            # Calculate time difference in seconds
-                            time_diff = (expiry_time - now).total_seconds()
-                            
-                            if time_diff <= 0:
-                                model['expires_in'] = 'Expired'
-                            elif time_diff < 60:
-                                model['expires_in'] = f"{int(time_diff)} seconds"
-                            elif time_diff < 3600:
-                                model['expires_in'] = f"{int(time_diff // 60)} minutes"
-                            elif time_diff < 86400:
-                                model['expires_in'] = f"{int(time_diff // 3600)} hours"
-                            else:
-                                model['expires_in'] = f"{int(time_diff // 86400)} days"
-                        except Exception:
-                            model['expires_in'] = 'Unknown'
-                else:
+
+        models_data = active_client().ps()
+        models = models_data.get('models', [])
+
+        # Add expires_in calculation
+        for model in models:
+            if model.get('expires_at'):
+                # Check if it's the "never expires" sentinel value
+                if model['expires_at'].startswith('0001-01-01'):
                     model['expires_in'] = 'Never'
-            
-            return render_template('running_models.html', models=models)
-        else:
-            flash(f"Error fetching running models: {response.status_code}", "danger")
-            return render_template('running_models.html', models=[])
+                else:
+                    # Parse the expiration time
+                    try:
+                        # Parse ISO 8601 format
+                        expiry_time = datetime.fromisoformat(model['expires_at'].replace('Z', '+00:00'))
+                        now = datetime.now().astimezone()
+
+                        # Calculate time difference in seconds
+                        time_diff = (expiry_time - now).total_seconds()
+
+                        if time_diff <= 0:
+                            model['expires_in'] = 'Expired'
+                        elif time_diff < 60:
+                            model['expires_in'] = f"{int(time_diff)} seconds"
+                        elif time_diff < 3600:
+                            model['expires_in'] = f"{int(time_diff // 60)} minutes"
+                        elif time_diff < 86400:
+                            model['expires_in'] = f"{int(time_diff // 3600)} hours"
+                        else:
+                            model['expires_in'] = f"{int(time_diff // 86400)} days"
+                    except Exception:
+                        model['expires_in'] = 'Unknown'
+            else:
+                model['expires_in'] = 'Never'
+
+        return render_template('running_models.html', models=models)
     except Exception as e:
         flash(f"Error connecting to Ollama API: {str(e)}", "danger")
         return render_template('running_models.html', models=[])
@@ -328,12 +346,7 @@ def running_models():
 def unload_model(model_name):
     try:
         # Unload model by setting keep_alive to 0
-        payload = {
-            "model": model_name,
-            "prompt": "",
-            "keep_alive": "0"
-        }
-        response = requests.post(f"{OLLAMA_API_URL}/generate", json=payload)
+        response = active_client().generate({"model": model_name, "keep_alive": 0}, stream=False)
 
         if response.status_code == 200:
             flash(f"Model {model_name} unloaded successfully", "success")
@@ -348,13 +361,8 @@ def unload_model(model_name):
 def chat():
     # Get available models for the dropdown
     try:
-        response = requests.get(f"{OLLAMA_API_URL}/tags")
-        if response.status_code == 200:
-            models_data = response.json()
-            return render_template('chat.html', models=models_data.get('models', []))
-        else:
-            flash(f"Error fetching models: {response.status_code}", "danger")
-            return render_template('chat.html', models=[])
+        models_data = active_client().tags()
+        return render_template('chat.html', models=models_data.get('models', []))
     except Exception as e:
         flash(f"Error connecting to Ollama API: {str(e)}", "danger")
         return render_template('chat.html', models=[])
@@ -372,13 +380,13 @@ def api_chat():
     
     if stream:
         return stream_chat_response(model, messages)
-    
+
     try:
-        response = requests.post(
-            f"{OLLAMA_API_URL}/chat", 
-            json={"model": model, "messages": messages, "stream": False}
+        response = active_client().chat(
+            {"model": model, "messages": messages, "stream": False},
+            stream=False
         )
-        
+
         if response.status_code == 200:
             result = response.json()
             # Extract assistant's message from the response
@@ -397,17 +405,16 @@ def stream_chat_response(model, messages):
         assistant_message = ""
         try:
             # Make streaming request to Ollama API
-            response = requests.post(
-                f"{OLLAMA_API_URL}/chat",
-                json={"model": model, "messages": messages, "stream": True},
+            response = active_client().chat(
+                {"model": model, "messages": messages, "stream": True},
                 stream=True
             )
-            
+
             if response.status_code != 200:
                 error_msg = f"Error from Ollama API: {response.status_code}"
                 yield f"data: {json.dumps({'error': error_msg})}\n\n"
                 return
-                
+
             for line in response.iter_lines():
                 if line:
                     try:
@@ -419,27 +426,22 @@ def stream_chat_response(model, messages):
                             yield f"data: {json.dumps({'delta': content_delta, 'content': assistant_message})}\n\n"
                     except json.JSONDecodeError:
                         continue
-            
+
             # Send the final message with the complete conversation
             final_conversation = messages + [{"role": "assistant", "content": assistant_message}]
             yield f"data: {json.dumps({'done': True, 'conversation': final_conversation})}\n\n"
-            
+
         except Exception as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
-            
+
     return app.response_class(generate(), mimetype='text/event-stream')
 
 @app.route('/generate')
 def generate():
     # Get available models for the dropdown
     try:
-        response = requests.get(f"{OLLAMA_API_URL}/tags")
-        if response.status_code == 200:
-            models_data = response.json()
-            return render_template('generate.html', models=models_data.get('models', []))
-        else:
-            flash(f"Error fetching models: {response.status_code}", "danger")
-            return render_template('generate.html', models=[])
+        models_data = active_client().tags()
+        return render_template('generate.html', models=models_data.get('models', []))
     except Exception as e:
         flash(f"Error connecting to Ollama API: {str(e)}", "danger")
         return render_template('generate.html', models=[])
@@ -492,8 +494,8 @@ def api_generate():
             payload["options"] = processed_options
     
     try:
-        response = requests.post(f"{OLLAMA_API_URL}/generate", json=payload)
-        
+        response = active_client().generate(payload, stream=False)
+
         if response.status_code == 200:
             result = response.json()
             return jsonify(result)
@@ -524,12 +526,8 @@ def version():
 
     # Get current version from Ollama API
     try:
-        response = requests.get(f"{OLLAMA_API_URL}/version")
-        if response.status_code == 200:
-            version_data = response.json()
-            current_version = version_data.get('version', 'Unknown')
-        else:
-            flash(f"Error fetching version: {response.status_code}", "danger")
+        version_data = active_client().version()
+        current_version = version_data.get('version', 'Unknown')
     except Exception as e:
         flash(f"Error connecting to Ollama API: {str(e)}", "danger")
 
@@ -597,10 +595,8 @@ def check_updates():
         # Get current version
         current_version = "Unknown"
         try:
-            response = requests.get(f"{OLLAMA_API_URL}/version")
-            if response.status_code == 200:
-                version_data = response.json()
-                current_version = version_data.get('version', 'Unknown')
+            version_data = active_client().version()
+            current_version = version_data.get('version', 'Unknown')
         except Exception as e:
             return jsonify({"error": f"Error connecting to Ollama API: {str(e)}"}), 500
         
@@ -669,4 +665,4 @@ def check_updates():
         return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
 
 if __name__ == '__main__':
-    app.run(host=HOST, port=PORT, debug=True)
+    app.run(host=HOST, port=PORT, debug=True, threaded=True)
