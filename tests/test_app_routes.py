@@ -27,11 +27,11 @@ def test_models_page_renders_with_mocked_tags(client, monkeypatch):
     app_module, test_client = client
 
     class FakeClient:
+        def __init__(self, base_url=None): pass
         def tags(self):
             return {"models": [{"name": "llama3.2", "size": 100, "details": {}}]}
 
-    monkeypatch.setattr(app_module, "active_client", lambda: FakeClient())
-    monkeypatch.setattr(app_module, "client_for", lambda sid: FakeClient())
+    monkeypatch.setattr(app_module, "OllamaClient", FakeClient)
     resp = test_client.get("/models")
     assert resp.status_code == 200
     assert b"llama3.2" in resp.data
@@ -171,3 +171,30 @@ def test_broadcast_delete_collects_per_server_results(client, monkeypatch):
     ok = {r["name"]: r["ok"] for r in results}
     assert ok[s1["name"]] is True
     assert ok["Remote"] is False
+
+
+def test_merged_models_marks_drift_and_survives_offline(client, monkeypatch):
+    app_module, _ = client
+    import servers
+    s1 = servers.list_servers()[0]
+    s2 = servers.add_server("Remote", "http://10.0.0.10:11434")
+    s3 = servers.add_server("Down", "http://10.0.0.11:11434")
+
+    class C:
+        def __init__(self, base_url): self.base_url = base_url
+        def tags(self):
+            if "10.0.0.11" in self.base_url:
+                raise RuntimeError("offline")
+            if "10.0.0.10" in self.base_url:
+                return {"models": [{"name": "shared", "size": 1, "details": {}}]}
+            return {"models": [
+                {"name": "shared", "size": 1, "details": {}},
+                {"name": "only1", "size": 2, "details": {}}]}
+
+    monkeypatch.setattr(app_module, "OllamaClient", C)
+    models_list, status = app_module.merged_models(servers.get_enabled())
+    by_name = {m["name"]: m for m in models_list}
+    assert status[s3["id"]] is False
+    assert by_name["only1"]["is_drift"] is True
+    assert s2["id"] in [srv["id"] for srv in by_name["only1"]["missing_on"]]
+    assert by_name["shared"]["is_drift"] is False

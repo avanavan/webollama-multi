@@ -127,26 +127,33 @@ window.__ALL_SERVERS__ = {{ servers | map(attribute='id') | list | tojson }}.map
         <p class="text-muted">Models available on this server</p>
     </div>
 
+    {% if drift_count %}
+    <div class="alert alert-warning">
+        <i class="fas fa-triangle-exclamation me-2"></i>
+        {{ drift_count }} model(s) are not present on every online server.
+    </div>
+    {% endif %}
+
     {% if models %}
     <div class="mb-3">
         <div class="d-flex justify-content-end align-items-center">
             <div class="me-2 text-muted small">Sort by:</div>
             <div class="btn-group">
-                <a href="{{ url_for('models', sort='name', order='asc' if sort_by != 'name' or sort_order == 'desc' else 'desc') }}" 
+                <a href="{{ url_for('models', sort='name', order='asc' if sort_by != 'name' or sort_order == 'desc' else 'desc') }}"
                    class="btn btn-sm {{ 'btn-primary' if sort_by == 'name' else 'btn-outline-primary' }}">
                     Name
                     {% if sort_by == 'name' %}
                         <i class="fas fa-sort-{{ 'down' if sort_order == 'asc' else 'up' }} ms-1"></i>
                     {% endif %}
                 </a>
-                <a href="{{ url_for('models', sort='size', order='asc' if sort_by != 'size' or sort_order == 'desc' else 'desc') }}" 
+                <a href="{{ url_for('models', sort='size', order='asc' if sort_by != 'size' or sort_order == 'desc' else 'desc') }}"
                    class="btn btn-sm {{ 'btn-primary' if sort_by == 'size' else 'btn-outline-primary' }}">
                     Size
                     {% if sort_by == 'size' %}
                         <i class="fas fa-sort-{{ 'down' if sort_order == 'asc' else 'up' }} ms-1"></i>
                     {% endif %}
                 </a>
-                <a href="{{ url_for('models', sort='modified', order='asc' if sort_by != 'modified' or sort_order == 'desc' else 'desc') }}" 
+                <a href="{{ url_for('models', sort='modified', order='asc' if sort_by != 'modified' or sort_order == 'desc' else 'desc') }}"
                    class="btn btn-sm {{ 'btn-primary' if sort_by == 'modified' else 'btn-outline-primary' }}">
                     Modified
                     {% if sort_by == 'modified' %}
@@ -182,6 +189,9 @@ window.__ALL_SERVERS__ = {{ servers | map(attribute='id') | list | tojson }}.map
                                     <i class="fas fa-sort-{{ 'down' if sort_order == 'asc' else 'up' }} ms-1 text-primary"></i>
                                 {% endif %}
                             </th>
+                            {% for s in servers %}
+                            <th class="text-center">{{ s.name }}{% if not server_status[s.id] %} <span class="badge bg-secondary">off</span>{% endif %}</th>
+                            {% endfor %}
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -194,19 +204,39 @@ window.__ALL_SERVERS__ = {{ servers | map(attribute='id') | list | tojson }}.map
                             <td>{{ (model.size / (1024*1024))|round(1) }} MB</td>
                             <td>{{ model.details.parameter_size if model.details.parameter_size else 'N/A' }}</td>
                             <td>{{ model.details.quantization_level if model.details.quantization_level else 'N/A' }}</td>
-                            <td data-bs-toggle="tooltip" title="{{ model.modified_at|replace('T', ' ')|replace('Z', '')|truncate(19, True, '') }}">
+                            <td data-bs-toggle="tooltip" title="{{ model.modified_at|replace('T', ' ')|replace('Z', '')|truncate(19, True, '') if model.modified_at else '' }}">
                                 {{ model.modified_ago }}</td>
+                            {% for s in servers %}
+                            <td class="text-center">
+                                {% if s.id in model.present_on %}
+                                    <i class="fas fa-check text-success"></i>
+                                {% elif server_status[s.id] %}
+                                    <i class="fas fa-minus text-muted"></i>
+                                {% else %}
+                                    <span class="text-muted">?</span>
+                                {% endif %}
+                            </td>
+                            {% endfor %}
                             <td>
-                                <div class="d-flex">
-                                    <a href="/models/{{ model.name|urlencode }}" class="btn btn-sm btn-outline-primary me-2" data-bs-toggle="tooltip" title="View details">
+                                <div class="d-flex flex-wrap gap-1">
+                                    <a href="/models/{{ model.name|urlencode }}" class="btn btn-sm btn-outline-primary" data-bs-toggle="tooltip" title="View details">
                                         <i class="fas fa-info-circle"></i>
                                     </a>
-                                    <a href="/models/update/{{ model.name|urlencode }}" class="btn btn-sm btn-outline-success me-2" data-bs-toggle="tooltip" title="Update model">
+                                    <a href="/models/update/{{ model.name|urlencode }}" class="btn btn-sm btn-outline-success" data-bs-toggle="tooltip" title="Update model">
                                         <i class="fas fa-sync-alt"></i>
                                     </a>
-                                    <button type="button" class="btn btn-sm btn-outline-danger delete-btn" data-model-id="{{ loop.index }}" data-model-name="{{ model.name }}" data-bs-toggle="tooltip" title="Delete model">
+                                    <button type="button" class="btn btn-sm btn-outline-danger delete-btn"
+                                            data-model-id="{{ loop.index }}"
+                                            data-model-name="{{ model.name }}"
+                                            data-present="{{ model.present_on | join(',') }}"
+                                            data-bs-toggle="tooltip" title="Delete model">
                                         <i class="fas fa-trash"></i>
                                     </button>
+                                    {% if model.is_drift %}
+                                    <a class="btn btn-sm btn-outline-warning"
+                                       href="{{ url_for('pull_page') }}?model={{ model.name | urlencode }}&targets={{ model.missing_on | map(attribute='id') | join(',') }}"
+                                       title="Pull to servers missing it"><i class="fas fa-rotate"></i> Sync</a>
+                                    {% endif %}
                                 </div>
                             </td>
                         </tr>

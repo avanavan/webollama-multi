@@ -8,14 +8,16 @@
     <div class="mb-3">
       <label for="model_name" class="form-label">Model Name</label>
       <input type="text" class="form-control" id="model_name"
-             placeholder="e.g., llama3.2, mistral:latest">
+             placeholder="e.g., llama3.2, mistral:latest"
+             value="{{ prefill_model }}">
     </div>
     <div class="mb-3">
       <label class="form-label">Target servers</label>
       {% for s in servers %}
       <div class="form-check">
         <input class="form-check-input target-server" type="checkbox"
-               id="srv-{{ s.id }}" value="{{ s.id }}" data-name="{{ s.name }}" checked>
+               id="srv-{{ s.id }}" value="{{ s.id }}" data-name="{{ s.name }}"
+               {{ 'checked' if (not prefill_targets or prefill_targets == [''] or s.id in prefill_targets) }}>
         <label class="form-check-label" for="srv-{{ s.id }}">{{ s.name }} <small class="text-muted">{{ s.base_url }}</small></label>
       </div>
       {% endfor %}

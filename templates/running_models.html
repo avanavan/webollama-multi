@@ -15,6 +15,7 @@
             <thead>
                 <tr>
                     <th>Name</th>
+                    <th>Server</th>
                     <th>Parameter Size</th>
                     <th>Quantization</th>
                     <th>Memory Usage</th>
@@ -30,6 +31,7 @@
                             {{ model.name }}
                         </a>
                     </td>
+                    <td><span class="badge bg-secondary">{{ model.server_name }}</span></td>
                     <td>{{ model.details.parameter_size if model.details.parameter_size else 'N/A' }}</td>
                     <td>{{ model.details.quantization_level if model.details.quantization_level else 'N/A' }}</td>
                     <td>{{ (model.size_vram / (1024*1024*1024))|round(2) }} GB</td>

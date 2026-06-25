@@ -87,60 +87,79 @@ def index():
         pass
     return render_template('index.html', version=current_version)
 
+def merged_models(enabled):
+    """Query all enabled servers, merge models by name, detect drift."""
+    merged = {}
+    server_status = {}
+    for s in enabled:
+        try:
+            data = OllamaClient(s["base_url"]).tags()
+            server_status[s["id"]] = True
+            for m in data.get("models", []):
+                entry = merged.setdefault(m["name"], {
+                    "name": m["name"], "size": m.get("size", 0),
+                    "details": m.get("details", {}), "modified_at": m.get("modified_at"),
+                    "present_on": [],
+                })
+                entry["present_on"].append(s["id"])
+        except Exception:
+            server_status[s["id"]] = False
+    online_ids = {sid for sid, ok in server_status.items() if ok}
+    models_list = list(merged.values())
+    for m in models_list:
+        m["missing_on"] = [s for s in enabled
+                           if s["id"] in online_ids and s["id"] not in m["present_on"]]
+        m["is_drift"] = len(m["missing_on"]) > 0
+    return models_list, server_status
+
+
+def _compute_modified_ago(modified_at):
+    """Return a human-readable string for how long ago a model was modified."""
+    from datetime import datetime
+    if not modified_at:
+        return 'Unknown'
+    try:
+        modified_time = datetime.fromisoformat(modified_at.replace('Z', '+00:00'))
+        now = datetime.now().astimezone()
+        time_diff = (now - modified_time).total_seconds()
+        if time_diff < 60:
+            return f"{int(time_diff)} seconds ago"
+        elif time_diff < 3600:
+            return f"{int(time_diff // 60)} minutes ago"
+        elif time_diff < 86400:
+            return f"{int(time_diff // 3600)} hours ago"
+        elif time_diff < 604800:
+            return f"{int(time_diff // 86400)} days ago"
+        elif time_diff < 2592000:
+            return f"{int(time_diff // 604800)} weeks ago"
+        else:
+            return f"{int(time_diff // 2592000)} months ago"
+    except Exception:
+        return 'Unknown'
+
+
 @app.route('/models')
 def models():
-    try:
-        from datetime import datetime
-
-        models_data = active_client().tags()
-        models_list = models_data.get('models', [])
-
-        # Calculate how long ago each model was modified
-        for model in models_list:
-            if model.get('modified_at'):
-                try:
-                    # Parse ISO 8601 format
-                    modified_time = datetime.fromisoformat(model['modified_at'].replace('Z', '+00:00'))
-                    now = datetime.now().astimezone()
-
-                    # Calculate time difference in seconds
-                    time_diff = (now - modified_time).total_seconds()
-
-                    if time_diff < 60:
-                        model['modified_ago'] = f"{int(time_diff)} seconds ago"
-                    elif time_diff < 3600:
-                        model['modified_ago'] = f"{int(time_diff // 60)} minutes ago"
-                    elif time_diff < 86400:
-                        model['modified_ago'] = f"{int(time_diff // 3600)} hours ago"
-                    elif time_diff < 604800:  # 7 days
-                        model['modified_ago'] = f"{int(time_diff // 86400)} days ago"
-                    elif time_diff < 2592000:  # 30 days
-                        model['modified_ago'] = f"{int(time_diff // 604800)} weeks ago"
-                    else:
-                        model['modified_ago'] = f"{int(time_diff // 2592000)} months ago"
-                except Exception:
-                    model['modified_ago'] = 'Unknown'
-            else:
-                model['modified_ago'] = 'Unknown'
-
-        # Get sort params from request
-        sort_by = request.args.get('sort', 'name')
-        sort_order = request.args.get('order', 'asc')
-
-        # Handle sorting
-        if sort_by == 'name':
-            models_list.sort(key=lambda x: x.get('name', '').lower(), reverse=(sort_order == 'desc'))
-        elif sort_by == 'size':
-            models_list.sort(key=lambda x: x.get('size', 0), reverse=(sort_order == 'desc'))
-        elif sort_by == 'modified':
-            models_list.sort(key=lambda x: x.get('modified_at', ''), reverse=(sort_order == 'desc'))
-
-        return render_template('models.html', models=models_list, sort_by=sort_by, sort_order=sort_order,
-                               servers=servers.get_enabled())
-    except Exception as e:
-        flash(f"Error connecting to Ollama API: {str(e)}", "danger")
-        return render_template('models.html', models=[], sort_by='name', sort_order='asc',
-                               servers=servers.get_enabled())
+    enabled = servers.get_enabled()
+    models_list, server_status = merged_models(enabled)
+    sort_by = request.args.get('sort', 'name')
+    sort_order = request.args.get('order', 'asc')
+    rev = sort_order == 'desc'
+    if sort_by == 'name':
+        models_list.sort(key=lambda x: x['name'].lower(), reverse=rev)
+    elif sort_by == 'size':
+        models_list.sort(key=lambda x: x.get('size', 0), reverse=rev)
+    elif sort_by == 'modified':
+        models_list.sort(key=lambda x: x.get('modified_at') or '', reverse=rev)
+    # Compute modified_ago for each model (preserved from original route)
+    for m in models_list:
+        m['modified_ago'] = _compute_modified_ago(m.get('modified_at'))
+    drift_count = sum(1 for m in models_list if m['is_drift'])
+    if not enabled:
+        flash("No active server configured. Add or enable a server on the Servers page.", "danger")
+    return render_template('models.html', models=models_list, servers=enabled,
+                           server_status=server_status, drift_count=drift_count,
+                           sort_by=sort_by, sort_order=sort_order)
 
 @app.route('/models/<path:model_name>')
 def model_detail(model_name):
@@ -197,7 +216,9 @@ def update_model(model_name):
 
 @app.route('/pull')
 def pull_page():
-    return render_template('pull_model.html', servers=servers.get_enabled())
+    return render_template('pull_model.html', servers=servers.get_enabled(),
+                           prefill_model=request.args.get('model', ''),
+                           prefill_targets=request.args.get('targets', '').split(','))
 
 
 @app.route('/pull/stream', methods=['POST'])
@@ -362,47 +383,40 @@ def stream_create_model(payload):
 
 @app.route('/running-models')
 def running_models():
-    try:
-        from datetime import datetime
-
-        models_data = active_client().ps()
-        models = models_data.get('models', [])
-
-        # Add expires_in calculation
-        for model in models:
-            if model.get('expires_at'):
-                # Check if it's the "never expires" sentinel value
-                if model['expires_at'].startswith('0001-01-01'):
-                    model['expires_in'] = 'Never'
+    from datetime import datetime
+    rows = []
+    for s in servers.get_enabled():
+        try:
+            data = OllamaClient(s["base_url"]).ps()
+            for model in data.get("models", []):
+                model["server_name"] = s["name"]
+                # Add expires_in calculation
+                if model.get('expires_at'):
+                    if model['expires_at'].startswith('0001-01-01'):
+                        model['expires_in'] = 'Never'
+                    else:
+                        try:
+                            expiry_time = datetime.fromisoformat(model['expires_at'].replace('Z', '+00:00'))
+                            now = datetime.now().astimezone()
+                            time_diff = (expiry_time - now).total_seconds()
+                            if time_diff <= 0:
+                                model['expires_in'] = 'Expired'
+                            elif time_diff < 60:
+                                model['expires_in'] = f"{int(time_diff)} seconds"
+                            elif time_diff < 3600:
+                                model['expires_in'] = f"{int(time_diff // 60)} minutes"
+                            elif time_diff < 86400:
+                                model['expires_in'] = f"{int(time_diff // 3600)} hours"
+                            else:
+                                model['expires_in'] = f"{int(time_diff // 86400)} days"
+                        except Exception:
+                            model['expires_in'] = 'Unknown'
                 else:
-                    # Parse the expiration time
-                    try:
-                        # Parse ISO 8601 format
-                        expiry_time = datetime.fromisoformat(model['expires_at'].replace('Z', '+00:00'))
-                        now = datetime.now().astimezone()
-
-                        # Calculate time difference in seconds
-                        time_diff = (expiry_time - now).total_seconds()
-
-                        if time_diff <= 0:
-                            model['expires_in'] = 'Expired'
-                        elif time_diff < 60:
-                            model['expires_in'] = f"{int(time_diff)} seconds"
-                        elif time_diff < 3600:
-                            model['expires_in'] = f"{int(time_diff // 60)} minutes"
-                        elif time_diff < 86400:
-                            model['expires_in'] = f"{int(time_diff // 3600)} hours"
-                        else:
-                            model['expires_in'] = f"{int(time_diff // 86400)} days"
-                    except Exception:
-                        model['expires_in'] = 'Unknown'
-            else:
-                model['expires_in'] = 'Never'
-
-        return render_template('running_models.html', models=models)
-    except Exception as e:
-        flash(f"Error connecting to Ollama API: {str(e)}", "danger")
-        return render_template('running_models.html', models=[])
+                    model['expires_in'] = 'Never'
+                rows.append(model)
+        except Exception:
+            continue
+    return render_template('running_models.html', models=rows)
 
 @app.route('/models/unload/<path:model_name>', methods=['POST'])
 def unload_model(model_name):
