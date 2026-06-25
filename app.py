@@ -507,6 +507,65 @@ def api_generate():
     except Exception as e:
         return jsonify({"error": f"Error connecting to Ollama API: {str(e)}"}), 500
 
+@app.route('/servers')
+def servers_page():
+    items = servers.list_servers()
+    status = {}
+    for s in items:
+        status[s["id"]] = OllamaClient(s["base_url"]).ping()
+    return render_template('servers.html', servers=items, status=status,
+                           active_id=servers.get_active_id(session))
+
+
+@app.route('/servers/add', methods=['POST'])
+def servers_add():
+    try:
+        servers.add_server(request.form.get('name'), request.form.get('base_url'))
+        flash("Server added", "success")
+    except ValueError as e:
+        flash(str(e), "danger")
+    return redirect(url_for('servers_page'))
+
+
+@app.route('/servers/<server_id>/edit', methods=['POST'])
+def servers_edit(server_id):
+    try:
+        servers.update_server(
+            server_id,
+            name=request.form.get('name'),
+            base_url=request.form.get('base_url'),
+            enabled='enabled' in request.form,
+        )
+        flash("Server updated", "success")
+    except ValueError as e:
+        flash(str(e), "danger")
+    return redirect(url_for('servers_page'))
+
+
+@app.route('/servers/<server_id>/delete', methods=['POST'])
+def servers_delete(server_id):
+    try:
+        servers.delete_server(server_id)
+        flash("Server removed", "success")
+    except ValueError as e:
+        flash(str(e), "danger")
+    return redirect(url_for('servers_page'))
+
+
+@app.route('/servers/active', methods=['POST'])
+def servers_set_active():
+    servers.set_active(session, request.form.get('server_id'))
+    return redirect(request.referrer or url_for('models'))
+
+
+@app.context_processor
+def inject_servers():
+    return {
+        "nav_servers": servers.get_enabled(),
+        "nav_active_id": servers.get_active_id(session),
+    }
+
+
 @app.route('/help')
 def help_page():
     return render_template('help.html')

@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Servers{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h1><i class="fas fa-server me-2"></i>Ollama Servers</h1>
+</div>
+
+<div class="card mb-4">
+  <div class="card-header">Add a server</div>
+  <div class="card-body">
+    <form method="POST" action="{{ url_for('servers_add') }}" class="row g-2">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="col-md-4">
+        <input class="form-control" name="name" placeholder="Name (e.g. GPU box)" required>
+      </div>
+      <div class="col-md-6">
+        <input class="form-control" name="base_url" placeholder="http://host:11434" required>
+      </div>
+      <div class="col-md-2 d-grid">
+        <button class="btn btn-primary" type="submit"><i class="fas fa-plus me-1"></i>Add</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="table-responsive">
+  <table class="table table-hover align-middle">
+    <thead class="table-light">
+      <tr><th>Name</th><th>Base URL</th><th>Status</th><th>Enabled</th><th>Active</th><th>Actions</th></tr>
+    </thead>
+    <tbody>
+      {% for s in servers %}
+      <tr>
+        <td>{{ s.name }}</td>
+        <td><code>{{ s.base_url }}</code></td>
+        <td>
+          {% if status[s.id] %}
+            <span class="badge bg-success">online</span>
+          {% else %}
+            <span class="badge bg-secondary">offline</span>
+          {% endif %}
+        </td>
+        <td>{{ 'Yes' if s.enabled else 'No' }}</td>
+        <td>
+          {% if s.id == active_id %}
+            <span class="badge bg-dark">active</span>
+          {% else %}
+            <form method="POST" action="{{ url_for('servers_set_active') }}" class="d-inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="server_id" value="{{ s.id }}">
+              <button class="btn btn-sm btn-outline-dark" type="submit">Make active</button>
+            </form>
+          {% endif %}
+        </td>
+        <td>
+          <button class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse"
+                  data-bs-target="#edit-{{ s.id }}"><i class="fas fa-edit"></i></button>
+          <form method="POST" action="{{ url_for('servers_delete', server_id=s.id) }}" class="d-inline"
+                onsubmit="return confirm('Remove {{ s.name }}?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-sm btn-outline-danger" type="submit"><i class="fas fa-trash"></i></button>
+          </form>
+        </td>
+      </tr>
+      <tr class="collapse" id="edit-{{ s.id }}">
+        <td colspan="6">
+          <form method="POST" action="{{ url_for('servers_edit', server_id=s.id) }}" class="row g-2">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="col-md-4"><input class="form-control" name="name" value="{{ s.name }}"></div>
+            <div class="col-md-5"><input class="form-control" name="base_url" value="{{ s.base_url }}"></div>
+            <div class="col-md-2 form-check d-flex align-items-center ms-2">
+              <input class="form-check-input me-1" type="checkbox" name="enabled" {{ 'checked' if s.enabled }}>
+              <label class="form-check-label">Enabled</label>
+            </div>
+            <div class="col-md-1 d-grid"><button class="btn btn-success" type="submit">Save</button></div>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
