@@ -6,13 +6,14 @@ A web interface for managing Ollama models and generating text using Python Flas
 
 - View and manage local Ollama models
 - Pull new models from the Ollama library
-- Create custom models with system prompts
+- Create custom models with system prompts and custom context size
 - Chat with Ollama models with conversation history
 - Generate text completions with customizable parameters
 - View and unload models currently running in memory
 - Monitor model resource usage and expiration
 - Compare model versions and check for updates
 - Display real-time changelog from GitHub releases
+- Manage multiple Ollama servers from one panel; broadcast pull/delete/create with per-server progress; reconcile model drift; create models with custom context size and parameters
 - Responsive UI with modern design for desktop and mobile
 
 ## Screenshots
@@ -120,11 +121,16 @@ python app.py
 The application can be configured using environment variables or a `.env` file:
 
 - `SECRET_KEY`: Flask secret key for sessions (default: a development key)
-- `OLLAMA_API_BASE`: Base URL of the Ollama API (default: `http://127.0.0.1:11434`)
+- `OLLAMA_API_BASE`: Base URL of the Ollama API (default: `http://127.0.0.1:11434`). Only used to seed the first server on first run; after that, manage servers in the UI at `/servers`.
+- `WEBOLLAMA_SERVERS_FILE`: Path to the JSON file storing managed servers (default: `servers.json` next to `app.py`)
 - `PORT`: Port to run the web interface on (default: `5000`)
 - `HOST`: Host to bind the web interface to (default: `127.0.0.1`)
 
 If running with Docker, you can modify the ports and configuration in the Docker Compose files.
+
+## Multiple Servers
+
+WebOllama supports managing multiple Ollama servers from a single interface. Add and manage servers using the servers panel at `/servers`. All model operations (pull, create, delete) can be broadcast across selected servers with real-time per-server progress tracking.
 
 ## Contributing
 
