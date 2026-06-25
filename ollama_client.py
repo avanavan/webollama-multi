@@ -29,20 +29,21 @@ class OllamaClient:
 
     def pull(self, model, stream=False):
         return requests.post(
-            f"{self.api}/pull", json={"model": model, "stream": stream}, stream=stream
+            f"{self.api}/pull", json={"model": model, "stream": stream}, stream=stream,
+            timeout=(self.timeout, None),
         )
 
     def delete(self, model):
         return requests.delete(f"{self.api}/delete", json={"model": model}, timeout=self.timeout)
 
     def create(self, payload, stream=False):
-        return requests.post(f"{self.api}/create", json=payload, stream=stream)
+        return requests.post(f"{self.api}/create", json=payload, stream=stream, timeout=(self.timeout, None))
 
     def generate(self, payload, stream=False):
-        return requests.post(f"{self.api}/generate", json=payload, stream=stream)
+        return requests.post(f"{self.api}/generate", json=payload, stream=stream, timeout=(self.timeout, None))
 
     def chat(self, payload, stream=True):
-        return requests.post(f"{self.api}/chat", json=payload, stream=stream)
+        return requests.post(f"{self.api}/chat", json=payload, stream=stream, timeout=(self.timeout, None))
 
     def ping(self):
         try:
