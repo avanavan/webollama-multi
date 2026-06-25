@@ -48,5 +48,5 @@ class OllamaClient:
         try:
             r = requests.get(f"{self.api}/version", timeout=2)
             return r.status_code == 200
-        except Exception:
+        except (requests.RequestException, ConnectionError):
             return False
