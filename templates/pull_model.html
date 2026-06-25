@@ -23,13 +23,17 @@
       {% endfor %}
     </div>
     <div class="d-flex justify-content-between">
-      <a href="/models" class="btn btn-secondary">Cancel</a>
-      <button id="pull-btn" class="btn btn-primary"><i class="fas fa-download me-2"></i>Pull Model</button>
+      <a href="/models" class="btn btn-secondary">Back to Models</a>
+      <button id="pull-btn" class="btn btn-primary"><i class="fas fa-download me-2"></i>Add to queue</button>
     </div>
   </div>
 </div>
 
-<div id="progress-area" class="mt-4"></div>
+<div class="d-flex justify-content-between align-items-center mt-4 mb-2">
+  <h5 class="mb-0">Pull queue</h5>
+  <button id="clear-btn" class="btn btn-sm btn-outline-secondary">Clear finished</button>
+</div>
+<div id="queue-area"><p class="text-muted small">No pulls yet.</p></div>
 {% endblock %}
 
 {% block extra_js %}
@@ -40,90 +44,84 @@ function escapeHtml(s) {
   });
 }
 
-document.getElementById('pull-btn').addEventListener('click', function () {
-  const model = document.getElementById('model_name').value.trim();
-  if (!model) { alert('Enter a model name'); return; }
-  const csrf = document.getElementById('csrf_token').value;
-  const targets = Array.from(document.querySelectorAll('.target-server:checked'));
-  if (!targets.length) { alert('Select at least one server'); return; }
-  const area = document.getElementById('progress-area');
-  area.innerHTML = '';
-  let remaining = targets.length;
+var CSRF = document.getElementById('csrf_token').value;
 
-  targets.forEach(function (cb) {
-    const sid = cb.value, name = cb.dataset.name;
-    const card = document.createElement('div');
-    card.className = 'card mb-2';
-    card.innerHTML = `<div class="card-body py-2">
-        <div class="d-flex justify-content-between"><strong>${escapeHtml(name)}</strong><span class="status small text-muted">starting…</span></div>
-        <div class="progress mt-1" style="height:18px;">
-          <div class="progress-bar" role="progressbar" style="width:0%">0%</div>
-        </div>
-      </div>`;
-    area.appendChild(card);
-    const bar = card.querySelector('.progress-bar');
-    const status = card.querySelector('.status');
+var BADGE = {
+  queued: 'bg-secondary', running: 'bg-dark',
+  success: 'bg-success', error: 'bg-danger', canceled: 'bg-secondary'
+};
 
-    fetch('/pull/stream', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
-      body: JSON.stringify({ server_id: sid, model: model })
-    }).then(function (resp) {
-      if (!resp.ok) {
-        return resp.json().then(function (j) {
-          status.textContent = 'error: ' + (j.error || resp.status);
-          bar.classList.add('bg-danger');
-          finish();
-        }).catch(function () {
-          status.textContent = 'error: ' + resp.status;
-          bar.classList.add('bg-danger');
-          finish();
-        });
-      }
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      function read() {
-        reader.read().then(function (r) {
-          if (r.done) { finish(); return; }
-          decoder.decode(r.value, { stream: true }).split('\n').forEach(function (line) {
-            if (!line.startsWith('data: ')) return;
-            try {
-              const d = JSON.parse(line.slice(6));
-              if (d.error) { status.textContent = 'error: ' + d.error; bar.classList.add('bg-danger'); return; }
-              if (d.done) { return; }
-              if (d.total && d.completed !== null && d.completed !== undefined) {
-                const pct = Math.floor(d.completed / d.total * 100);
-                bar.style.width = pct + '%'; bar.textContent = pct + '%';
-              }
-              if (d.status) { status.textContent = d.status; }
-            } catch (e) {}
-          });
-          read();
-        }).catch(function () {
-          if (!bar.classList.contains('bg-danger')) {
-            status.textContent = 'connection lost';
-            bar.classList.add('bg-danger');
-          }
-          finish();
-        });
-      }
-      read();
-    }).catch(function (e) { status.textContent = 'error: ' + e.message; bar.classList.add('bg-danger'); finish(); });
+function pct(j) {
+  if (j.total) return Math.floor(j.completed / j.total * 100);
+  return j.state === 'success' ? 100 : 0;
+}
 
-    function finish() {
-      if (!bar.classList.contains('bg-danger')) {
-        bar.style.width = '100%'; bar.textContent = 'done'; bar.classList.add('bg-success');
-        status.textContent = 'complete';
-      }
-      remaining -= 1;
-      if (remaining === 0) {
-        const done = document.createElement('div');
-        done.className = 'mt-2';
-        done.innerHTML = '<a href="/models" class="btn btn-outline-primary btn-sm">Back to Models</a>';
-        area.appendChild(done);
-      }
-    }
+function barClass(j) {
+  if (j.state === 'error') return 'progress-bar bg-danger';
+  if (j.state === 'success') return 'progress-bar bg-success';
+  if (j.state === 'canceled') return 'progress-bar bg-secondary';
+  if (j.state === 'running') return 'progress-bar progress-bar-striped progress-bar-animated';
+  return 'progress-bar';
+}
+
+function render(jobs) {
+  var area = document.getElementById('queue-area');
+  if (!jobs.length) { area.innerHTML = '<p class="text-muted small">No pulls yet.</p>'; return; }
+  area.innerHTML = jobs.map(function (j) {
+    var p = pct(j);
+    var active = (j.state === 'queued' || j.state === 'running');
+    var label = j.state === 'error'
+      ? ('error: ' + escapeHtml(j.error || ''))
+      : escapeHtml(j.status || j.state);
+    var btn = active
+      ? '<button class="btn btn-sm btn-outline-danger cancel-btn" data-id="' + escapeHtml(j.id) + '">Cancel</button>'
+      : '';
+    return '<div class="card mb-2"><div class="card-body py-2">'
+      + '<div class="d-flex justify-content-between align-items-center">'
+      + '<div><strong>' + escapeHtml(j.model) + '</strong> '
+      + '<span class="text-muted small">' + escapeHtml(j.server_name) + '</span></div>'
+      + '<div class="d-flex align-items-center gap-2">'
+      + '<span class="badge ' + (BADGE[j.state] || 'bg-secondary') + '">' + escapeHtml(j.state) + '</span>'
+      + btn + '</div></div>'
+      + '<div class="progress mt-1" style="height:18px;"><div class="' + barClass(j) + '" style="width:' + p + '%">' + p + '%</div></div>'
+      + '<div class="small text-muted mt-1">' + label + '</div>'
+      + '</div></div>';
+  }).join('');
+  Array.prototype.forEach.call(area.querySelectorAll('.cancel-btn'), function (b) {
+    b.addEventListener('click', function () { cancelJob(b.dataset.id); });
   });
+}
+
+function refresh() {
+  return fetch('/pull/jobs').then(function (r) { return r.json(); })
+    .then(function (d) { render(d.jobs || []); }).catch(function () {});
+}
+
+function cancelJob(id) {
+  fetch('/pull/cancel/' + encodeURIComponent(id),
+    { method: 'POST', headers: { 'X-CSRFToken': CSRF } }).then(refresh);
+}
+
+document.getElementById('pull-btn').addEventListener('click', function () {
+  var model = document.getElementById('model_name').value.trim();
+  if (!model) { alert('Enter a model name'); return; }
+  var ids = Array.prototype.slice.call(document.querySelectorAll('.target-server:checked'))
+    .map(function (c) { return c.value; });
+  if (!ids.length) { alert('Select at least one server'); return; }
+  fetch('/pull/enqueue', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+    body: JSON.stringify({ model: model, server_ids: ids })
+  }).then(function (r) { return r.json(); })
+    .then(function (d) { if (d.error) alert(d.error); refresh(); })
+    .catch(function () {});
 });
+
+document.getElementById('clear-btn').addEventListener('click', function () {
+  fetch('/pull/clear', { method: 'POST', headers: { 'X-CSRFToken': CSRF } }).then(refresh);
+});
+
+refresh();
+setInterval(refresh, 1000);
 </script>
 {% endblock %}
