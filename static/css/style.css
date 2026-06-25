@@ -570,8 +570,12 @@ code {
   .content {
     padding: 1rem;
   }
-  
+
   h1 {
     font-size: 1.25rem;
   }
 }
+
+/* Pull model progress cards */
+#progress-area .progress-bar.bg-success { color: #fff; }
+#progress-area .card-body { font-size: 0.95rem; }

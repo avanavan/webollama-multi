@@ -1,48 +1,104 @@
 {% extends "base.html" %}
-
-{% block title %}WebOllama - Pull Model{% endblock %}
-
+{% block title %}Pull Model{% endblock %}
 {% block content %}
-<div class="container">
-    <div class="row mb-4">
-        <div class="col-12">
-            <h1>Pull Model</h1>
-        </div>
+<h1 class="mb-4"><i class="fas fa-download me-2"></i>Pull Model</h1>
+<input type="hidden" id="csrf_token" value="{{ csrf_token() }}">
+<div class="card">
+  <div class="card-body">
+    <div class="mb-3">
+      <label for="model_name" class="form-label">Model Name</label>
+      <input type="text" class="form-control" id="model_name"
+             placeholder="e.g., llama3.2, mistral:latest">
     </div>
-
-    <div class="row">
-        <div class="col-md-8 offset-md-2">
-            <div class="card">
-                <div class="card-body">
-                    <form method="POST" action="/pull">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <div class="mb-3">
-                            <label for="model_name" class="form-label">Model Name</label>
-                            <input 
-                                type="text" 
-                                class="form-control" 
-                                id="model_name" 
-                                name="model_name" 
-                                placeholder="e.g., llama3.2, llama2:13b, mistral:latest"
-                                required
-                            >
-                            <div class="form-text">
-                                Enter the name of the model you want to pull from the Ollama library.
-                            </div>
-                        </div>
-                        <div class="alert alert-info">
-                            <i class="fas fa-info-circle me-2"></i> Pull operations may take some time depending on the model size and your internet connection.
-                        </div>
-                        <div class="d-flex justify-content-between">
-                            <a href="/models" class="btn btn-secondary">Cancel</a>
-                            <button type="submit" class="btn btn-primary">
-                                <i class="fas fa-download me-2"></i> Pull Model
-                            </button>
-                        </div>
-                    </form>
-                </div>
-            </div>
-        </div>
+    <div class="mb-3">
+      <label class="form-label">Target servers</label>
+      {% for s in servers %}
+      <div class="form-check">
+        <input class="form-check-input target-server" type="checkbox"
+               id="srv-{{ s.id }}" value="{{ s.id }}" data-name="{{ s.name }}" checked>
+        <label class="form-check-label" for="srv-{{ s.id }}">{{ s.name }} <small class="text-muted">{{ s.base_url }}</small></label>
+      </div>
+      {% endfor %}
     </div>
+    <div class="d-flex justify-content-between">
+      <a href="/models" class="btn btn-secondary">Cancel</a>
+      <button id="pull-btn" class="btn btn-primary"><i class="fas fa-download me-2"></i>Pull Model</button>
+    </div>
+  </div>
 </div>
+
+<div id="progress-area" class="mt-4"></div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.getElementById('pull-btn').addEventListener('click', function () {
+  const model = document.getElementById('model_name').value.trim();
+  if (!model) { alert('Enter a model name'); return; }
+  const csrf = document.getElementById('csrf_token').value;
+  const targets = Array.from(document.querySelectorAll('.target-server:checked'));
+  if (!targets.length) { alert('Select at least one server'); return; }
+  const area = document.getElementById('progress-area');
+  area.innerHTML = '';
+  let remaining = targets.length;
+
+  targets.forEach(function (cb) {
+    const sid = cb.value, name = cb.dataset.name;
+    const card = document.createElement('div');
+    card.className = 'card mb-2';
+    card.innerHTML = `<div class="card-body py-2">
+        <div class="d-flex justify-content-between"><strong>${name}</strong><span class="status small text-muted">starting…</span></div>
+        <div class="progress mt-1" style="height:18px;">
+          <div class="progress-bar" role="progressbar" style="width:0%">0%</div>
+        </div>
+      </div>`;
+    area.appendChild(card);
+    const bar = card.querySelector('.progress-bar');
+    const status = card.querySelector('.status');
+
+    fetch('/pull/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+      body: JSON.stringify({ server_id: sid, model: model })
+    }).then(function (resp) {
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      function read() {
+        reader.read().then(function (r) {
+          if (r.done) { finish(); return; }
+          decoder.decode(r.value, { stream: true }).split('\n').forEach(function (line) {
+            if (!line.startsWith('data: ')) return;
+            try {
+              const d = JSON.parse(line.slice(6));
+              if (d.error) { status.textContent = 'error: ' + d.error; bar.classList.add('bg-danger'); return; }
+              if (d.done) { return; }
+              if (d.total && d.completed != null) {
+                const pct = Math.floor(d.completed / d.total * 100);
+                bar.style.width = pct + '%'; bar.textContent = pct + '%';
+              }
+              if (d.status) { status.textContent = d.status; }
+            } catch (e) {}
+          });
+          read();
+        });
+      }
+      read();
+    }).catch(function (e) { status.textContent = 'error: ' + e.message; bar.classList.add('bg-danger'); finish(); });
+
+    function finish() {
+      if (!bar.classList.contains('bg-danger')) {
+        bar.style.width = '100%'; bar.textContent = 'done'; bar.classList.add('bg-success');
+        status.textContent = 'complete';
+      }
+      remaining -= 1;
+      if (remaining === 0) {
+        const done = document.createElement('div');
+        done.className = 'mt-2';
+        done.innerHTML = '<a href="/models" class="btn btn-outline-primary btn-sm">Back to Models</a>';
+        area.appendChild(done);
+      }
+    }
+  });
+});
+</script>
 {% endblock %}

@@ -79,3 +79,25 @@ def test_add_duplicate_server_flashes_error(client):
     assert b"already exists" in resp.data
     # still only the seeded server + the one Remote we added
     assert len([s for s in servers.list_servers() if s["base_url"] == "http://10.0.0.7:11434"]) == 1
+
+
+def test_pull_stream_forwards_and_terminates(client, monkeypatch):
+    app_module, test_client = client
+    import servers
+    s = servers.list_servers()[0]
+
+    class FakeResp:
+        status_code = 200
+        def iter_lines(self):
+            yield b'{"status":"pulling","total":100,"completed":50}'
+            yield b'{"status":"success"}'
+
+    class FakeClient:
+        def __init__(self, *a, **k): pass
+        def pull(self, model, stream=False): return FakeResp()
+
+    monkeypatch.setattr(app_module, "OllamaClient", FakeClient)
+    resp = test_client.post("/pull/stream", json={"server_id": s["id"], "model": "llama3.2"})
+    body = resp.get_data(as_text=True)
+    assert '"completed":50' in body
+    assert '"done": true' in body

@@ -174,21 +174,34 @@ def update_model(model_name):
         flash(f"Error connecting to Ollama API: {str(e)}", "danger")
     return redirect(url_for('models'))
 
-@app.route('/pull', methods=['GET', 'POST'])
-def pull_model():
-    if request.method == 'POST':
-        model_name = request.form.get('model_name')
+@app.route('/pull')
+def pull_page():
+    return render_template('pull_model.html', servers=servers.get_enabled())
+
+
+@app.route('/pull/stream', methods=['POST'])
+def pull_stream():
+    data = request.get_json(silent=True) or {}
+    server_id = data.get('server_id')
+    model = data.get('model')
+    server = servers.get_server(server_id)
+    if not server or not model:
+        return jsonify({"error": "server_id and model are required"}), 400
+
+    def generate():
         try:
-            response = active_client().pull(model_name, stream=False)
-            if response.status_code == 200:
-                flash(f"Model {model_name} pulled successfully", "success")
-            else:
-                flash(f"Error pulling model: {response.status_code}", "danger")
-            return redirect(url_for('models'))
+            resp = OllamaClient(server["base_url"]).pull(model, stream=True)
+            if resp.status_code != 200:
+                yield f"data: {json.dumps({'error': f'HTTP {resp.status_code}'})}\n\n"
+                return
+            for line in resp.iter_lines():
+                if line:
+                    yield f"data: {line.decode('utf-8')}\n\n"
+            yield f"data: {json.dumps({'done': True})}\n\n"
         except Exception as e:
-            flash(f"Error connecting to Ollama API: {str(e)}", "danger")
-            return redirect(url_for('pull_model'))
-    return render_template('pull_model.html')
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return Response(generate(), mimetype='text/event-stream')
 
 @app.route('/create', methods=['GET'])
 def create_model_page():
