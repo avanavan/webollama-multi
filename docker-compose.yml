@@ -1,17 +1,30 @@
-version: '3'
-
+# WebOllama only — connect to one or more Ollama servers you already run.
+# After it starts, open http://127.0.0.1:5000/servers to add more servers.
 services:
   webollama:
-    #build:
-    #  context: .
-    #  dockerfile: Dockerfile
-    image: ghcr.io/dkruyt/webollama:latest
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+    image: ghcr.io/avanavan/webollama-multi:latest
     container_name: webollama
     ports:
       - "5000:5000"
+    environment:
+      # Seeds the first ("Default") server on first run; add the rest in the UI.
+      - OLLAMA_API_BASE=http://host.docker.internal:11434
+    extra_hosts:
+      # Lets the container reach an Ollama running on the Docker host.
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Persist the managed server list across restarts.
+      - webollama_data:/data
     restart: unless-stopped
     networks:
       - webollama-network
+
+volumes:
+  webollama_data:
+    name: webollama_data
 
 networks:
   webollama-network:

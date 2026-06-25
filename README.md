@@ -65,18 +65,50 @@ echo "OLLAMA_API_BASE=http://localhost:11434" >> .env
 
 ### Setup (Docker)
 
-#### Option 1: Connect to local Ollama instance
+The published image is **`ghcr.io/avanavan/webollama-multi:latest`** (multi-arch:
+`linux/amd64` + `linux/arm64`). Both Compose files reference it; the managed
+server list is persisted in a `webollama_data` volume mounted at `/data`.
+
+#### Option 1: Connect to Ollama server(s) you already run
 
 ```bash
-# Pull and run the WebOllama container only
-docker-compose up -d
+# Runs the WebOllama container only.
+# Edit OLLAMA_API_BASE in docker-compose.yml to point at your first Ollama server,
+# then add any others from the UI at /servers.
+docker compose up -d
 ```
 
-#### Option 2: Run both Ollama and WebOllama in containers
+#### Option 2: Run WebOllama with TWO Ollama servers (multi-server demo)
 
 ```bash
-# Run both Ollama and WebOllama containers
-docker-compose -f docker-compose.ollama.yml up -d
+# Brings up WebOllama + ollama1 (:11434) + ollama2 (:11435)
+docker compose -f docker-compose.ollama.yml up -d
+```
+
+WebOllama seeds the first server (`ollama1`) automatically. Open
+`http://127.0.0.1:5000/servers` and add the second:
+
+| Name | Base URL |
+|------|----------|
+| Server 2 | `http://ollama2:11434` |
+
+From then on, pulling/creating/deleting models broadcasts to both, with a
+per-server progress bar each, and the Models page shows per-server presence with
+one-click drift sync.
+
+#### Container image & CI
+
+Pushes to `main`, version tags (`v*`), and manual runs of the
+**Docker Build and Push** GitHub Actions workflow
+(`.github/workflows/docker-build.yml`) build the image and publish it to GHCR at
+`ghcr.io/<owner>/<repo>` (e.g. `ghcr.io/avanavan/webollama-multi`). Pull
+requests build the image but do not push. Run it directly with:
+
+```bash
+docker run -d -p 5000:5000 \
+  -e OLLAMA_API_BASE=http://host.docker.internal:11434 \
+  -v webollama_data:/data \
+  ghcr.io/avanavan/webollama-multi:latest
 ```
 
 ## Usage
@@ -130,7 +162,23 @@ If running with Docker, you can modify the ports and configuration in the Docker
 
 ## Multiple Servers
 
-WebOllama supports managing multiple Ollama servers from a single interface. Add and manage servers using the servers panel at `/servers`. All model operations (pull, create, delete) can be broadcast across selected servers with real-time per-server progress tracking.
+WebOllama manages multiple Ollama servers from a single interface:
+
+- **Manage servers in the UI** — add, edit, enable/disable, and remove servers at
+  `/servers`; the list is persisted to `servers.json` (path set by
+  `WEBOLLAMA_SERVERS_FILE`). `OLLAMA_API_BASE` only seeds the first server on first run.
+- **Synced mutations** — pull, create, and delete broadcast to all enabled servers
+  by default, with a per-action checkbox to narrow the targets.
+- **Per-server progress** — pulling and creating show one live progress bar per
+  target server.
+- **Drift reconciliation** — the Models page merges every server's inventory, marks
+  which models are missing where, and offers one-click **Sync** to pull a model to
+  the servers that lack it.
+- **Active server** — the navbar switcher picks the server used by single-server
+  pages (Chat, Generate, Model detail, Version).
+
+The fastest way to try it is `docker compose -f docker-compose.ollama.yml up -d`
+(see [Option 2](#option-2-run-webollama-with-two-ollama-servers-multi-server-demo)).
 
 ## Contributing
 
