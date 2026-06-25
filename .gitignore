@@ -53,3 +53,5 @@ htmlcov/
 coverage.xml
 *.cover
 **/.claude/settings.local.json
+servers.json
+
