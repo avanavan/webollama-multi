@@ -251,6 +251,9 @@ def create_model_stream():
     server = servers.get_server(data.get('server_id'))
     if not server or not data.get('model_name'):
         return jsonify({"error": "server_id and model_name are required"}), 400
+    method = data.get('creation_method', 'from_model')
+    if method == 'from_model' and not (data.get('from_model') or '').strip():
+        return jsonify({"error": "Select or enter a base model"}), 400
     try:
         payload = build_create_payload(data, stream=True)
     except (ValueError, TypeError) as e:
@@ -272,15 +275,27 @@ def create_model_stream():
     return Response(generate(), mimetype='text/event-stream')
 
 
+def union_model_names(enabled):
+    """Deduped, sorted model names across all reachable enabled servers."""
+    names = set()
+    for s in enabled:
+        try:
+            data = OllamaClient(s["base_url"]).tags()
+            for m in data.get("models", []):
+                names.add(m["name"])
+        except Exception:
+            continue
+    return sorted(names)
+
+
 @app.route('/create', methods=['GET'])
 def create_model_page():
-    try:
-        models_data = active_client().tags()
-        return render_template('create_model.html', models=models_data.get('models', []),
-                               servers=servers.get_enabled())
-    except Exception as e:
-        flash(f"Error connecting to Ollama API: {str(e)}", "danger")
-        return render_template('create_model.html', models=[], servers=servers.get_enabled())
+    enabled = servers.get_enabled()
+    if not enabled:
+        flash("No active server configured. Add or enable a server on the Servers page.", "danger")
+    return render_template('create_model.html',
+                           model_names=union_model_names(enabled),
+                           servers=enabled)
 
 @app.route('/create-model', methods=['GET', 'POST'])
 def create_model():

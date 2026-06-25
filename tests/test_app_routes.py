@@ -183,6 +183,18 @@ def test_create_stream_rejects_bad_num_ctx(client):
     assert resp.status_code == 400
 
 
+def test_create_stream_rejects_empty_from(client):
+    app_module, test_client = client
+    import servers
+    s = servers.list_servers()[0]
+    resp = test_client.post("/create-model/stream", json={
+        "server_id": s["id"], "model_name": "m",
+        "creation_method": "from_model", "from_model": "",
+    })
+    assert resp.status_code == 400
+    assert b"base model" in resp.data
+
+
 def test_merged_models_marks_drift_and_survives_offline(client, monkeypatch):
     app_module, _ = client
     import servers

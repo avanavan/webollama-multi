@@ -178,16 +178,15 @@ document.getElementById('create-model-form').addEventListener('submit', function
                         <div id="from_model_section">
                             <div class="mb-3">
                                 <label for="from_model" class="form-label">Base Model <span class="text-danger">*</span></label>
-                                <select class="form-select" id="from_model" name="from_model" required>
-                                    {% if models %}
-                                        {% for model in models %}
-                                        <option value="{{ model.name }}">{{ model.name }}</option>
-                                        {% endfor %}
-                                    {% else %}
-                                        <option value="">No models available</option>
-                                    {% endif %}
-                                </select>
-                                <div class="form-text">The existing model to use as a base</div>
+                                <input class="form-control" list="base-model-list"
+                                       id="from_model" name="from_model" required
+                                       placeholder="e.g. llama3.2 (type any model name)">
+                                <datalist id="base-model-list">
+                                    {% for name in model_names %}
+                                    <option value="{{ name }}">
+                                    {% endfor %}
+                                </datalist>
+                                <div class="form-text">Pick an existing model or type any model name; target servers pull it if missing.</div>
                             </div>
                         </div>
                         
