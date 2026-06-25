@@ -150,3 +150,24 @@ def test_create_stream_requires_server_and_model(client):
     # unknown server_id
     r2 = test_client.post("/create-model/stream", json={"server_id": "nope", "model_name": "m"})
     assert r2.status_code == 400
+
+
+def test_broadcast_delete_collects_per_server_results(client, monkeypatch):
+    app_module, _ = client
+    import servers
+    s1 = servers.list_servers()[0]
+    s2 = servers.add_server("Remote", "http://10.0.0.9:11434")
+
+    class OKResp: status_code = 200
+    class FailClient:
+        def __init__(self, base_url): self.base_url = base_url
+        def delete(self, model):
+            if "10.0.0.9" in self.base_url:
+                raise RuntimeError("unreachable")
+            return OKResp()
+
+    monkeypatch.setattr(app_module, "OllamaClient", FailClient)
+    results = app_module.broadcast_delete("llama3.2", [s1["id"], s2["id"]])
+    ok = {r["name"]: r["ok"] for r in results}
+    assert ok[s1["name"]] is True
+    assert ok["Remote"] is False

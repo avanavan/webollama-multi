@@ -135,10 +135,12 @@ def models():
         elif sort_by == 'modified':
             models_list.sort(key=lambda x: x.get('modified_at', ''), reverse=(sort_order == 'desc'))
 
-        return render_template('models.html', models=models_list, sort_by=sort_by, sort_order=sort_order)
+        return render_template('models.html', models=models_list, sort_by=sort_by, sort_order=sort_order,
+                               servers=servers.get_enabled())
     except Exception as e:
         flash(f"Error connecting to Ollama API: {str(e)}", "danger")
-        return render_template('models.html', models=[], sort_by='name', sort_order='asc')
+        return render_template('models.html', models=[], sort_by='name', sort_order='asc',
+                               servers=servers.get_enabled())
 
 @app.route('/models/<path:model_name>')
 def model_detail(model_name):
@@ -149,16 +151,32 @@ def model_detail(model_name):
         flash(f"Error connecting to Ollama API: {str(e)}", "danger")
         return redirect(url_for('models'))
 
+def broadcast_delete(model_name, target_ids):
+    results = []
+    for sid in target_ids:
+        server = servers.get_server(sid)
+        if not server:
+            continue
+        try:
+            resp = OllamaClient(server["base_url"]).delete(model_name)
+            ok = resp.status_code == 200
+            results.append({"name": server["name"], "ok": ok,
+                            "message": "" if ok else f"HTTP {resp.status_code}"})
+        except Exception as e:
+            results.append({"name": server["name"], "ok": False, "message": str(e)})
+    return results
+
+
 @app.route('/models/delete/<path:model_name>', methods=['POST'])
 def delete_model(model_name):
-    try:
-        response = active_client().delete(model_name)
-        if response.status_code == 200:
-            flash(f"Model {model_name} deleted successfully", "success")
+    target_ids = request.form.getlist('target_ids')
+    if not target_ids:
+        target_ids = [s["id"] for s in servers.get_enabled()]
+    for r in broadcast_delete(model_name, target_ids):
+        if r["ok"]:
+            flash(f"Deleted {model_name} from {r['name']}", "success")
         else:
-            flash(f"Error deleting model: {response.status_code}", "danger")
-    except Exception as e:
-        flash(f"Error connecting to Ollama API: {str(e)}", "danger")
+            flash(f"Failed to delete {model_name} from {r['name']}: {r['message']}", "danger")
     return redirect(url_for('models'))
 
 @app.route('/models/update/<path:model_name>')
