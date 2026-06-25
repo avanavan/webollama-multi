@@ -32,6 +32,12 @@
 
 {% block extra_js %}
 <script>
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
 document.getElementById('pull-btn').addEventListener('click', function () {
   const model = document.getElementById('model_name').value.trim();
   if (!model) { alert('Enter a model name'); return; }
@@ -47,7 +53,7 @@ document.getElementById('pull-btn').addEventListener('click', function () {
     const card = document.createElement('div');
     card.className = 'card mb-2';
     card.innerHTML = `<div class="card-body py-2">
-        <div class="d-flex justify-content-between"><strong>${name}</strong><span class="status small text-muted">starting…</span></div>
+        <div class="d-flex justify-content-between"><strong>${escapeHtml(name)}</strong><span class="status small text-muted">starting…</span></div>
         <div class="progress mt-1" style="height:18px;">
           <div class="progress-bar" role="progressbar" style="width:0%">0%</div>
         </div>

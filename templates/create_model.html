@@ -4,6 +4,12 @@
 
 {% block extra_js %}
 <script>
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
     document.addEventListener('DOMContentLoaded', function() {
         // Show/hide fields based on creation method
         const creationMethod = document.getElementById('creation_method');
@@ -46,6 +52,11 @@ document.getElementById('add-param').addEventListener('click', function () {
 
 document.getElementById('create-model-form').addEventListener('submit', function (e) {
   e.preventDefault();
+  const method = document.getElementById('creation_method').value;
+  if (method !== 'from_model') {
+    alert('Creating models from a file is not yet supported in the web interface.');
+    return;
+  }
   const csrf = document.querySelector('input[name="csrf_token"]').value;
   const targets = Array.from(document.querySelectorAll('.target-server:checked'));
   if (!targets.length) { alert('Select at least one server'); return; }
@@ -54,7 +65,7 @@ document.getElementById('create-model-form').addEventListener('submit', function
   })).filter(p => p.key.trim());
   const base = {
     model_name: document.getElementById('model_name').value,
-    creation_method: 'from_model',
+    creation_method: method,
     from_model: document.getElementById('from_model') ? document.getElementById('from_model').value : '',
     system_prompt: document.getElementById('system_prompt').value,
     template: document.getElementById('template').value,
@@ -71,7 +82,7 @@ document.getElementById('create-model-form').addEventListener('submit', function
     const card = document.createElement('div');
     card.className = 'card mb-2';
     card.innerHTML = `<div class="card-body py-2">
-      <div class="d-flex justify-content-between"><strong>${cb.dataset.name}</strong><span class="status small text-muted">starting…</span></div>
+      <div class="d-flex justify-content-between"><strong>${escapeHtml(cb.dataset.name)}</strong><span class="status small text-muted">starting…</span></div>
       <div class="progress mt-1" style="height:18px;">
         <div class="progress-bar progress-bar-striped progress-bar-animated" style="width:100%">working…</div>
       </div></div>`;
@@ -262,13 +273,7 @@ document.getElementById('create-model-form').addEventListener('submit', function
                     </form>
                     
                     <!-- Progress section (hidden by default) -->
-                    <div id="progress-section" class="mt-4" style="display: none;">
-                        <h5>Model Creation Progress</h5>
-                        <div class="border rounded p-3 bg-light">
-                            <div id="progress-log" class="small" style="max-height: 300px; overflow-y: auto; font-family: monospace;">
-                            </div>
-                        </div>
-                    </div>
+                    <div id="progress-section" class="mt-4" style="display: none;"></div>
                 </div>
             </div>
         </div>

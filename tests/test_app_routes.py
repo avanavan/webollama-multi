@@ -136,6 +136,17 @@ def test_create_stream_forwards(client, monkeypatch):
     resp = test_client.post("/create-model/stream", json={
         "server_id": s["id"], "model_name": "m", "from_model": "base", "num_ctx": "4096"
     })
+    assert resp.status_code == 200
     body = resp.get_data(as_text=True)
     assert '"creating"' in body
     assert '"done": true' in body
+
+
+def test_create_stream_requires_server_and_model(client):
+    app_module, test_client = client
+    # missing model_name
+    r1 = test_client.post("/create-model/stream", json={"server_id": "whatever"})
+    assert r1.status_code == 400
+    # unknown server_id
+    r2 = test_client.post("/create-model/stream", json={"server_id": "nope", "model_name": "m"})
+    assert r2.status_code == 400
