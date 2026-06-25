@@ -81,27 +81,64 @@ def test_add_duplicate_server_flashes_error(client):
     assert len([s for s in servers.list_servers() if s["base_url"] == "http://10.0.0.7:11434"]) == 1
 
 
-def test_pull_stream_forwards_and_terminates(client, monkeypatch):
+def test_pull_enqueue_and_jobs(client, monkeypatch):
     app_module, test_client = client
-    import servers
-    s = servers.list_servers()[0]
+    import pull_jobs, servers
+    pull_jobs.reset()
 
     class FakeResp:
         status_code = 200
         def iter_lines(self):
-            yield b'{"status":"pulling","total":100,"completed":50}'
             yield b'{"status":"success"}'
-
+        def close(self): pass
     class FakeClient:
-        def __init__(self, *a, **k): pass
-        def pull(self, model, stream=False): return FakeResp()
+        def __init__(self, base_url): pass
+        def pull(self, model, stream=True): return FakeResp()
+    monkeypatch.setattr(pull_jobs, "OllamaClient", FakeClient)
 
-    monkeypatch.setattr(app_module, "OllamaClient", FakeClient)
-    resp = test_client.post("/pull/stream", json={"server_id": s["id"], "model": "llama3.2"})
-    assert resp.status_code == 200
-    body = resp.get_data(as_text=True)
-    assert '"completed":50' in body
-    assert '"done": true' in body
+    s = servers.list_servers()[0]
+    r = test_client.post("/pull/enqueue", json={"model": "llama3.2", "server_ids": [s["id"]]})
+    assert r.status_code == 200
+    assert r.get_json()["jobs"][0]["model"] == "llama3.2"
+    r2 = test_client.get("/pull/jobs")
+    assert any(j["model"] == "llama3.2" for j in r2.get_json()["jobs"])
+
+
+def test_pull_enqueue_requires_model(client):
+    app_module, test_client = client
+    r = test_client.post("/pull/enqueue", json={"server_ids": ["x"]})
+    assert r.status_code == 400
+
+
+def test_pull_enqueue_rejects_unknown_servers(client):
+    app_module, test_client = client
+    r = test_client.post("/pull/enqueue", json={"model": "m", "server_ids": ["nope"]})
+    assert r.status_code == 400
+
+
+def test_pull_cancel_route(client, monkeypatch):
+    app_module, test_client = client
+    import pull_jobs, servers
+    pull_jobs.reset()
+    gate = __import__("threading").Event()
+
+    class FakeResp:
+        status_code = 200
+        def iter_lines(self):
+            gate.wait(2)
+            yield b'{"status":"success"}'
+        def close(self): pass
+    class FakeClient:
+        def __init__(self, base_url): pass
+        def pull(self, model, stream=True): return FakeResp()
+    monkeypatch.setattr(pull_jobs, "OllamaClient", FakeClient)
+
+    s = servers.list_servers()[0]
+    job = pull_jobs.enqueue(s, "m")
+    r = test_client.post("/pull/cancel/" + job["id"])
+    assert r.status_code == 200
+    assert r.get_json()["ok"] is True
+    gate.set()
 
 
 def test_build_create_payload_includes_num_ctx_and_params(client):

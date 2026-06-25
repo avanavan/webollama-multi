@@ -7,6 +7,7 @@ import base64
 from flask_wtf.csrf import CSRFProtect
 import markdown
 import servers
+import pull_jobs
 from ollama_client import OllamaClient
 
 load_dotenv()
@@ -221,29 +222,40 @@ def pull_page():
                            prefill_targets=request.args.get('targets', '').split(','))
 
 
-@app.route('/pull/stream', methods=['POST'])
-def pull_stream():
+@app.route('/pull/enqueue', methods=['POST'])
+def pull_enqueue():
     data = request.get_json(silent=True) or {}
-    server_id = data.get('server_id')
-    model = data.get('model')
-    server = servers.get_server(server_id)
-    if not server or not model:
-        return jsonify({"error": "server_id and model are required"}), 400
+    model = (data.get('model') or '').strip()
+    if not model:
+        return jsonify({"error": "model is required"}), 400
+    ids = data.get('server_ids') or [s["id"] for s in servers.get_enabled()]
+    jobs = []
+    for sid in ids:
+        s = servers.get_server(sid)
+        if not s:
+            continue
+        job = pull_jobs.enqueue(s, model)
+        if job:
+            jobs.append(job)
+    if not jobs:
+        return jsonify({"error": "no valid target servers"}), 400
+    return jsonify({"jobs": jobs})
 
-    def generate():
-        try:
-            resp = OllamaClient(server["base_url"]).pull(model, stream=True)
-            if resp.status_code != 200:
-                yield f"data: {json.dumps({'error': f'HTTP {resp.status_code}'})}\n\n"
-                return
-            for line in resp.iter_lines():
-                if line:
-                    yield f"data: {line.decode('utf-8')}\n\n"
-            yield f"data: {json.dumps({'done': True})}\n\n"
-        except Exception as e:
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
-    return Response(generate(), mimetype='text/event-stream')
+@app.route('/pull/jobs')
+def pull_jobs_list():
+    return jsonify({"jobs": pull_jobs.snapshot()})
+
+
+@app.route('/pull/cancel/<job_id>', methods=['POST'])
+def pull_cancel(job_id):
+    return jsonify({"ok": pull_jobs.cancel(job_id)})
+
+
+@app.route('/pull/clear', methods=['POST'])
+def pull_clear():
+    pull_jobs.clear_finished()
+    return jsonify({"ok": True})
 
 @app.route('/create-model/stream', methods=['POST'])
 def create_model_stream():
