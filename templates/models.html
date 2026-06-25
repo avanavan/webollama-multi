@@ -21,13 +21,14 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>window.__ALL_SERVERS__ = {{ servers | map(attribute='id') | list | tojson }}.map((id, i) => ({id: id, name: {{ servers | map(attribute='name') | list | tojson }}[i]}));</script>
 <script>
 function escapeHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
     return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
   });
 }
+
+window.__ALL_SERVERS__ = {{ servers | map(attribute='id') | list | tojson }}.map((id, i) => ({id: id, name: {{ servers | map(attribute='name') | list | tojson }}[i]}));
 
     document.addEventListener('DOMContentLoaded', function() {
         // Initialize tooltips
@@ -60,7 +61,7 @@ function escapeHtml(s) {
                 box.innerHTML = '<label class="form-label small">Delete from:</label>';
                 window.__ALL_SERVERS__.forEach(function (s) {
                   const checked = present.length === 0 || present.includes(s.id) ? 'checked' : '';
-                  box.innerHTML += `<div class="form-check"><input class="form-check-input" type="checkbox" name="target_ids" value="${s.id}" ${checked} form="deleteModelForm"><label class="form-check-label">${escapeHtml(s.name)}</label></div>`;
+                  box.innerHTML += `<div class="form-check"><input class="form-check-input" type="checkbox" name="target_ids" value="${escapeHtml(s.id)}" ${checked} form="deleteModelForm"><label class="form-check-label">${escapeHtml(s.name)}</label></div>`;
                 });
 
                 // Show the modal

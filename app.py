@@ -172,7 +172,10 @@ def delete_model(model_name):
     target_ids = request.form.getlist('target_ids')
     if not target_ids:
         target_ids = [s["id"] for s in servers.get_enabled()]
-    for r in broadcast_delete(model_name, target_ids):
+    results = broadcast_delete(model_name, target_ids)
+    if not results:
+        flash("No servers selected for deletion", "warning")
+    for r in results:
         if r["ok"]:
             flash(f"Deleted {model_name} from {r['name']}", "success")
         else:
